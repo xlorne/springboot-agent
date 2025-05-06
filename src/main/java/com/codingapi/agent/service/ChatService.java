@@ -1,6 +1,6 @@
 package com.codingapi.agent.service;
 
-import com.codingapi.agent.AgentConfiguration;
+import com.codingapi.agent.advisor.Qwen3ThinkFilterAdvisor;
 import com.codingapi.agent.properties.AgentProperties;
 import com.codingapi.agent.tools.ToolsContext;
 import org.springframework.ai.chat.client.ChatClient;
@@ -34,10 +34,12 @@ public class ChatService {
 
     }
 
-    public String generation(String chatId, String userMessage) {
+    public String generation(String chatId, String userMessage, boolean think) {
         try {
-            ChatClient.CallResponseSpec responseSpec = chatClient.prompt()
+            ChatClient.CallResponseSpec responseSpec = chatClient
+                    .prompt()
                     .user(userMessage)
+                    .advisors(new Qwen3ThinkFilterAdvisor(think))
                     .advisors(a -> a.param(CHAT_MEMORY_CONVERSATION_ID_KEY, chatId)
                             .param(CHAT_MEMORY_RETRIEVE_SIZE_KEY, agentProperties.getChatMemoryRetrieveSize()))
                     .call();

@@ -8,4 +8,6 @@ import lombok.Setter;
 public class ChatRequest {
     private String chatId;
     private String message;
+
+    private boolean think = true;
 }

@@ -14,6 +14,11 @@ import java.nio.charset.StandardCharsets;
 public class AgentProperties {
 
     /**
+     * enable think mode
+     */
+    private boolean think;
+
+    /**
      * chat memory retrieve size
      */
     private int chatMemoryRetrieveSize = 1000;

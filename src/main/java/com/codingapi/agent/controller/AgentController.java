@@ -17,7 +17,7 @@ public class AgentController {
 
     @PostMapping("/chat")
     public String chat(@RequestBody ChatRequest request) {
-        return chatService.generation(request.getChatId(), request.getMessage());
+        return chatService.generation(request.getChatId(), request.getMessage(),request.isThink());
     }
 
 }
