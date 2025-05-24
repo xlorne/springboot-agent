@@ -2,17 +2,25 @@ package com.codingapi.agent.advisor;
 
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.client.advisor.api.*;
+import org.springframework.ai.chat.client.ChatClientRequest;
+import org.springframework.ai.chat.client.ChatClientResponse;
+import org.springframework.ai.chat.client.advisor.api.CallAdvisor;
+import org.springframework.ai.chat.client.advisor.api.CallAdvisorChain;
+import org.springframework.ai.chat.client.advisor.api.StreamAdvisor;
+import org.springframework.ai.chat.client.advisor.api.StreamAdvisorChain;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.chat.prompt.ChatOptions;
+import org.springframework.ai.chat.prompt.Prompt;
 import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
 import java.util.List;
 
 @Slf4j
-public class Qwen3ThinkFilterAdvisor implements CallAroundAdvisor, StreamAroundAdvisor {
+public class Qwen3ThinkFilterAdvisor implements CallAdvisor, StreamAdvisor {
 
     private final boolean thinkEnabled;
 
@@ -22,9 +30,12 @@ public class Qwen3ThinkFilterAdvisor implements CallAroundAdvisor, StreamAroundA
         this.thinkEnabled = thinkEnabled;
     }
 
-    private void checkModelName(AdvisedRequest advisedRequest) {
-        String modelName = advisedRequest.chatModel().getDefaultOptions().getModel();
-        this.qwen3Model = modelName != null && modelName.contains("qwen3");
+    private void checkModelName(ChatClientRequest advisedRequest) {
+        ChatOptions chatOptions = advisedRequest.prompt().getOptions();
+        if (chatOptions != null) {
+            String modelName = chatOptions.getModel();
+            this.qwen3Model = modelName != null && modelName.contains("qwen3");
+        }
     }
 
     private List<Generation> filterGenerations(List<Generation> generations) {
@@ -49,56 +60,62 @@ public class Qwen3ThinkFilterAdvisor implements CallAroundAdvisor, StreamAroundA
     }
 
 
-    private AdvisedRequest filterRequest(AdvisedRequest advisedRequest) {
+    private ChatClientRequest filterRequest(ChatClientRequest advisedRequest) {
         if (thinkEnabled) {
             return advisedRequest;
         }
-        String question = advisedRequest.userText();
+        Prompt prompt = advisedRequest.prompt();
+        UserMessage userMessage = prompt.getUserMessage();
+        String question = userMessage.getText();
         question = question + "/no_think";
-        return AdvisedRequest.from(advisedRequest)
-                .userText(question)
+        prompt = prompt.augmentUserMessage(question);
+        return ChatClientRequest.builder()
+                .prompt(prompt)
+                .context(advisedRequest.context())
                 .build();
     }
 
-    @Override
     @NonNull
-    public AdvisedResponse aroundCall(@NonNull AdvisedRequest advisedRequest, CallAroundAdvisorChain chain) {
-        this.checkModelName(advisedRequest);
+    @Override
+    public ChatClientResponse adviseCall(@NonNull ChatClientRequest chatClientRequest,
+                                         @NonNull CallAdvisorChain callAdvisorChain) {
+        this.checkModelName(chatClientRequest);
         if (qwen3Model) {
-            AdvisedRequest request = this.filterRequest(advisedRequest);
-            AdvisedResponse response = chain.nextAroundCall(request);
-            assert response.response() != null;
-            List<Generation> generations = this.filterGenerations(response.response().getResults());
-            return AdvisedResponse.builder()
-                    .response(ChatResponse.builder()
-                            .generations(generations)
+            ChatClientRequest request = this.filterRequest(chatClientRequest);
+            ChatClientResponse response = callAdvisorChain.nextCall(request);
+            assert response.chatResponse() != null;
+            List<Generation> generations = response.chatResponse().getResults();
+            return ChatClientResponse.builder()
+                    .chatResponse(ChatResponse.builder()
+                            .generations(this.filterGenerations(generations))
                             .build())
-                    .adviseContext(advisedRequest.adviseContext())
+                    .context(request.context())
                     .build();
-        }else {
-            return chain.nextAroundCall(advisedRequest);
+        } else {
+            return callAdvisorChain.nextCall(chatClientRequest);
         }
     }
 
-    @Override
     @NonNull
-    public Flux<AdvisedResponse> aroundStream(@NonNull AdvisedRequest advisedRequest, StreamAroundAdvisorChain chain) {
-        this.checkModelName(advisedRequest);
+    @Override
+    public Flux<ChatClientResponse> adviseStream(@NonNull ChatClientRequest chatClientRequest,
+                                                 @NonNull StreamAdvisorChain streamAdvisorChain) {
+        this.checkModelName(chatClientRequest);
         if (qwen3Model) {
-            AdvisedRequest request = this.filterRequest(advisedRequest);
-            return chain.nextAroundStream(request)
+            ChatClientRequest request = this.filterRequest(chatClientRequest);
+            return streamAdvisorChain.nextStream(request)
                     .map(advisedResponse -> {
-                        assert advisedResponse.response() != null;
-                        List<Generation> generations = this.filterGenerations(advisedResponse.response().getResults());
-                        return AdvisedResponse.builder()
-                                .response(ChatResponse.builder()
-                                        .generations(generations)
+                        assert advisedResponse.chatResponse() != null;
+                        List<Generation> generations = this.filterGenerations(advisedResponse.chatResponse().getResults());
+                        return ChatClientResponse.builder()
+                                .chatResponse(ChatResponse.builder()
+                                        .generations(this.filterGenerations(generations))
                                         .build())
-                                .adviseContext(advisedRequest.adviseContext())
+                                .context(request.context())
                                 .build();
                     });
-        }else {
-            return chain.nextAroundStream(advisedRequest);
+        } else {
+            return streamAdvisorChain.nextStream(chatClientRequest);
         }
     }
 

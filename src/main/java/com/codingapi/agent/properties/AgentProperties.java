@@ -19,9 +19,9 @@ public class AgentProperties {
     private boolean think;
 
     /**
-     * chat memory retrieve size
+     * chat memory size
      */
-    private int chatMemoryRetrieveSize = 1000;
+    private int chatMemorySize = 10;
 
     /**
      * default System prompt template file
