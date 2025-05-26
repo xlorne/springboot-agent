@@ -46,15 +46,19 @@ public class Qwen3ThinkFilterAdvisor implements CallAdvisor, StreamAdvisor {
         for (Generation generation : generations) {
             AssistantMessage assistantMessage = generation.getOutput();
             String text = assistantMessage.getText();
-            if (text.contains("<think>")) {
-                text = text.replaceAll("(?s)<think>.*?</think>", "");
-                text = text.replaceAll("(?m)^[ \\t]*\\r?\\n", "");
+            if (text != null) {
+                if (text.contains("<think>")) {
+                    text = text.replaceAll("(?s)<think>.*?</think>", "");
+                    text = text.replaceAll("(?m)^[ \\t]*\\r?\\n", "");
+                }
+                AssistantMessage responseMessage = new AssistantMessage(text,
+                        assistantMessage.getMetadata(),
+                        assistantMessage.getToolCalls(),
+                        assistantMessage.getMedia());
+                generationList.add(new Generation(responseMessage));
+            } else {
+                generationList.add(generation);
             }
-            AssistantMessage responseMessage = new AssistantMessage(text,
-                    assistantMessage.getMetadata(),
-                    assistantMessage.getToolCalls(),
-                    assistantMessage.getMedia());
-            generationList.add(new Generation(responseMessage));
         }
         return generationList;
     }
