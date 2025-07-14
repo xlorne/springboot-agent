@@ -10,13 +10,13 @@ import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.AssistantPromptTemplate;
+import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.stereotype.Service;
 
 @Service
 public class ChatService {
 
     private final ChatClient chatClient;
-    private final AgentProperties agentProperties;
     private final ToolCallingManager toolCallingManager;
 
     public ChatService(ChatClient.Builder modelBuilder,
@@ -25,7 +25,6 @@ public class ChatService {
                        ToolsContext toolsContext,
                        AgentProperties agentProperties) {
         this.toolCallingManager = toolCallingManager;
-        this.agentProperties = agentProperties;
 
         PromptChatMemoryAdvisor promptChatMemoryAdvisor =
                 PromptChatMemoryAdvisor
@@ -68,8 +67,9 @@ public class ChatService {
                     .prompt()
                     .user(userMessage)
                     .advisors(new DeepSeekToolsAdvisor(toolCallingManager))
-                    .advisors(a -> a.param(CHAT_MEMORY_CONVERSATION_ID_KEY, chatId)
-                            .param(CHAT_MEMORY_RETRIEVE_SIZE_KEY, agentProperties.getChatMemoryRetrieveSize()))
+                    .advisors(a -> {
+                        a.param(ChatMemory.CONVERSATION_ID, chatId);
+                    })
                     .call();
             ChatResponse chatResponse = responseSpec.chatResponse();
             if (chatResponse != null) {

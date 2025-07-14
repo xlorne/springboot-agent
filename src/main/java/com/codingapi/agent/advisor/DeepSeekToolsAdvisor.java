@@ -5,16 +5,19 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NonNull;
 import lombok.Setter;
-import org.springframework.ai.chat.client.advisor.api.AdvisedRequest;
-import org.springframework.ai.chat.client.advisor.api.AdvisedResponse;
-import org.springframework.ai.chat.client.advisor.api.CallAroundAdvisor;
-import org.springframework.ai.chat.client.advisor.api.CallAroundAdvisorChain;
+import org.springframework.ai.chat.client.ChatClientRequest;
+import org.springframework.ai.chat.client.ChatClientResponse;
+import org.springframework.ai.chat.client.advisor.api.CallAdvisor;
+import org.springframework.ai.chat.client.advisor.api.CallAdvisorChain;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
-import org.springframework.ai.model.function.FunctionCallback;
+import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.ai.model.tool.ToolExecutionResult;
+import org.springframework.ai.openai.OpenAiChatOptions;
+import org.springframework.ai.tool.ToolCallback;
+import org.springframework.ai.tool.definition.ToolDefinition;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -22,45 +25,49 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 @AllArgsConstructor
-public class DeepSeekToolsAdvisor implements CallAroundAdvisor {
+public class DeepSeekToolsAdvisor implements CallAdvisor {
 
     private final ToolCallingManager toolCallingManager;
 
-    private AdvisedRequest rebuildRequest(AdvisedRequest advisedRequest) {
-        List<FunctionCallback> tools = advisedRequest.functionCallbacks();
-        if (!tools.isEmpty()) {
-            String question = advisedRequest.userText();
-            String toolSchemas = tools.stream()
-                    .map((function) -> {
-                        StringBuilder schemaBuilder = new StringBuilder();
-                        schemaBuilder.append("Tool Name: ").append(function.getName()).append("\n");
-                        schemaBuilder.append("Description: ").append(function.getDescription()).append("\n");
-                        schemaBuilder.append("Parameters (JSON Schema): ").append(function.getInputTypeSchema()).append("\n");
-                        return schemaBuilder.toString();
-                    })
-                    .collect(Collectors.joining("\n\n"));
+    private ChatClientRequest rebuildRequest(ChatClientRequest advisedRequest) {
+        Prompt prompt = advisedRequest.prompt();
+        if(prompt.getOptions() instanceof OpenAiChatOptions openAiChatOptions){
+            List<ToolCallback> toolCallbacks = openAiChatOptions.getToolCallbacks();
+            if (!toolCallbacks.isEmpty()) {
+                String question = advisedRequest.prompt().getUserMessage().getText();
+                String toolSchemas = toolCallbacks.stream()
+                        .map((function) -> {
+                            ToolDefinition toolDefinition = function.getToolDefinition();
+                            StringBuilder schemaBuilder = new StringBuilder();
+                            schemaBuilder.append("Tool Name: ").append(toolDefinition.name()).append("\n");
+                            schemaBuilder.append("Description: ").append(toolDefinition.description()).append("\n");
+                            schemaBuilder.append("Parameters (JSON Schema): ").append(toolDefinition.inputSchema()).append("\n");
+                            return schemaBuilder.toString();
+                        })
+                        .collect(Collectors.joining("\n\n"));
 
-            String toolSchemasTemplate = "\n\n" +
-                    "You are an assistant that can answer questions using tools.\n" +
-                    "You MUST respond only with a JSON object in the following format:\n" +
-                    "[\n" +
-                    "{\n" +
-                    "  \"tool\": \"tool_name\",\n" +
-                    "  \"parameters\": { /* required parameters matching the JSON Schema */ }\n" +
-                    "}\n" +
-                    "]\n\n" +
-                    "Do NOT explain your answer.\n" +
-                    "Only choose from the tools listed below:\n\n" +
-                    toolSchemas +
-                    "\n\nBased on the user question, select the most appropriate tool and provide only the JSON response.";
-
-            return AdvisedRequest.from(advisedRequest)
-                    .userText(question + toolSchemasTemplate)
-                    .messages(advisedRequest.messages())
-                    .build();
-        } else {
-            return advisedRequest;
+                String toolSchemasTemplate = "\n\n" +
+                        "You are an assistant that can answer questions using tools.\n" +
+                        "You MUST respond only with a JSON object in the following format:\n" +
+                        "[\n" +
+                        "{\n" +
+                        "  \"tool\": \"tool_name\",\n" +
+                        "  \"parameters\": { /* required parameters matching the JSON Schema */ }\n" +
+                        "}\n" +
+                        "]\n\n" +
+                        "Do NOT explain your answer.\n" +
+                        "Only choose from the tools listed below:\n\n" +
+                        toolSchemas +
+                        "\n\nBased on the user question, select the most appropriate tool and provide only the JSON response.";
+                prompt.augmentUserMessage(question + toolSchemasTemplate);
+                return ChatClientRequest.builder()
+                        .context(advisedRequest.context())
+                        .prompt(advisedRequest.prompt())
+                        .build();
+            }
         }
+        return advisedRequest;
+
     }
 
     private String extractJsonFromAnswer(String text) {
@@ -75,8 +82,8 @@ public class DeepSeekToolsAdvisor implements CallAroundAdvisor {
     }
 
 
-    private AdvisedResponse response(AdvisedRequest advisedRequest, CallAroundAdvisorChain chain, AdvisedResponse advisedResponse) {
-        ChatResponse chatResponse = advisedResponse.response();
+    private ChatClientResponse response(ChatClientRequest advisedRequest, CallAdvisorChain chain, ChatClientResponse advisedResponse) {
+        ChatResponse chatResponse = advisedResponse.chatResponse();
         if (chatResponse != null) {
             List<Generation> deepseekGenerations = new ArrayList<>();
             List<Generation> generations = chatResponse.getResults();
@@ -91,27 +98,27 @@ public class DeepSeekToolsAdvisor implements CallAroundAdvisor {
                     .build();
 
             if (answerResponse.hasToolCalls()) {
-                ToolExecutionResult toolExecutionResult = toolCallingManager.executeToolCalls(advisedRequest.toPrompt(), answerResponse);
+                ToolExecutionResult toolExecutionResult = toolCallingManager.executeToolCalls(advisedRequest.prompt(), answerResponse);
                 if (toolExecutionResult.returnDirect()) {
-                    return AdvisedResponse.builder()
-                            .response(ChatResponse.builder()
+                    return ChatClientResponse.builder()
+                            .chatResponse(ChatResponse.builder()
                                     .from(answerResponse)
                                     .generations(ToolExecutionResult.buildGenerations(toolExecutionResult))
                                     .build())
-                            .adviseContext(advisedResponse.adviseContext())
+                            .context(advisedResponse.context())
                             .build();
                 } else {
-                    return chain.nextAroundCall(
-                            AdvisedRequest.from(advisedRequest)
-                                    .messages(toolExecutionResult.conversationHistory())
-                                    .advisors(advisedRequest.advisors())
+                    return chain.nextCall(
+                            ChatClientRequest.builder()
+                                    .prompt(new Prompt(toolExecutionResult.conversationHistory(),advisedRequest.prompt().getOptions()))
+                                    .context(advisedResponse.context())
                                     .build());
                 }
             }
 
-            return AdvisedResponse.builder()
-                    .response(answerResponse)
-                    .adviseContext(advisedResponse.adviseContext())
+            return ChatClientResponse.builder()
+                    .chatResponse(answerResponse)
+                    .context(advisedResponse.context())
                     .build();
         }
         return advisedResponse;
@@ -148,14 +155,13 @@ public class DeepSeekToolsAdvisor implements CallAroundAdvisor {
     }
 
 
-    @NonNull
-    @Override
-    public AdvisedResponse aroundCall(@NonNull AdvisedRequest advisedRequest,
-                                      @NonNull CallAroundAdvisorChain chain) {
-        AdvisedResponse response = chain.nextAroundCall(this.rebuildRequest(advisedRequest));
-        return this.response(advisedRequest, chain, response);
-    }
 
+
+    @Override
+    public ChatClientResponse adviseCall(ChatClientRequest chatClientRequest, CallAdvisorChain callAdvisorChain) {
+        ChatClientResponse response = callAdvisorChain.nextCall(this.rebuildRequest(chatClientRequest));
+        return this.response(chatClientRequest, callAdvisorChain, response);
+    }
 
     @NonNull
     @Override
