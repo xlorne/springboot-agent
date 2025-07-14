@@ -6,8 +6,8 @@ This example demonstrates how to integrate a SpringBoot-Agent with an LLM (Large
 
 ## Prerequisites
 
-- **Ollama Server**: Ensure you have the Ollama server running with at least 24GB of GPU memory.
-- **LLM Model**: The example uses the `qwen2.5:32b` model. Make sure this model is available on your Ollama server.
+- **Ollama Server**: Ensure you have the Ollama server running with at least 6GB of GPU memory.
+- **LLM Model**: The example uses the `qwen3:4b` model. Make sure this model is available on your Ollama server.
 
 ## How to Run
 
@@ -26,7 +26,7 @@ This example demonstrates how to integrate a SpringBoot-Agent with an LLM (Large
     spring.ai.openai.chat.base-url=http://10.95.90.95:18000/
     spring.ai.openai.chat.completions-path=/v1/chat/completions
 
-    codingapi.agent.chat-memory-retrieve-size=1000
+    codingapi.agent.chat-memory-size=10
     codingapi.agent.default-prompt-memory-template-file=classpath:texts/memory.txt
     codingapi.agent.default-system-template-file=classpath:texts/system.txt
     ```
@@ -57,9 +57,6 @@ curl --location 'http://localhost:8080/agent/chat' \
 
 ## Requirements
 
-- **Ollama Server**: Requires at least 24GB of GPU memory.
-- **LLM Model**: The example uses the `qwen2.5:32b` model.
+- **Ollama Server**: Requires at least 6GB of GPU memory.
+- **LLM Model**: The example uses the `qwen3:4b` model.
 
----
-
-This README provides a clear and concise guide to setting up and using the SpringBoot-Agent with an LLM via the Ollama server. It includes steps for configuration, building, and interacting with the agent, along with the necessary prerequisites and references.

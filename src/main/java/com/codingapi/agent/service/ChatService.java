@@ -9,11 +9,8 @@ import org.springframework.ai.chat.client.advisor.PromptChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
-import org.springframework.ai.model.tool.ToolCallingManager;
+import org.springframework.ai.chat.prompt.AssistantPromptTemplate;
 import org.springframework.stereotype.Service;
-
-import static org.springframework.ai.chat.client.advisor.AbstractChatMemoryAdvisor.CHAT_MEMORY_CONVERSATION_ID_KEY;
-import static org.springframework.ai.chat.client.advisor.AbstractChatMemoryAdvisor.CHAT_MEMORY_RETRIEVE_SIZE_KEY;
 
 @Service
 public class ChatService {
@@ -29,14 +26,18 @@ public class ChatService {
                        AgentProperties agentProperties) {
         this.toolCallingManager = toolCallingManager;
         this.agentProperties = agentProperties;
+
+        PromptChatMemoryAdvisor promptChatMemoryAdvisor =
+                PromptChatMemoryAdvisor
+                        .builder(chatMemory)
+                        .systemPromptTemplate(new AssistantPromptTemplate(agentProperties.getDefaultPromptMemoryTemplateText()))
+                        .build();
+
         this.chatClient = modelBuilder
                 .defaultSystem(agentProperties.getDefaultSystemTemplateText())
                 .defaultTools(toolsContext.getTools())
-                .defaultAdvisors(
-                        new PromptChatMemoryAdvisor(chatMemory, agentProperties.getDefaultPromptMemoryTemplateText())
-                )
+                .defaultAdvisors(promptChatMemoryAdvisor)
                 .build();
-
     }
 
     public String generation(String chatId, String userMessage, boolean think) {
@@ -45,8 +46,9 @@ public class ChatService {
                     .prompt()
                     .user(userMessage)
                     .advisors(new Qwen3ThinkFilterAdvisor(think))
-                    .advisors(a -> a.param(CHAT_MEMORY_CONVERSATION_ID_KEY, chatId)
-                            .param(CHAT_MEMORY_RETRIEVE_SIZE_KEY, agentProperties.getChatMemoryRetrieveSize()))
+                    .advisors(a -> {
+                        a.param(ChatMemory.CONVERSATION_ID, chatId);
+                    })
                     .call();
             ChatResponse chatResponse = responseSpec.chatResponse();
             if (chatResponse != null) {
