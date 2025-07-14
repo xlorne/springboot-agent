@@ -31,7 +31,7 @@ public class DeepSeekToolsAdvisor implements CallAdvisor {
 
     private ChatClientRequest rebuildRequest(ChatClientRequest advisedRequest) {
         Prompt prompt = advisedRequest.prompt();
-        if(prompt.getOptions() instanceof OpenAiChatOptions openAiChatOptions){
+        if (prompt.getOptions() instanceof OpenAiChatOptions openAiChatOptions) {
             List<ToolCallback> toolCallbacks = openAiChatOptions.getToolCallbacks();
             if (!toolCallbacks.isEmpty()) {
                 String question = advisedRequest.prompt().getUserMessage().getText();
@@ -110,7 +110,7 @@ public class DeepSeekToolsAdvisor implements CallAdvisor {
                 } else {
                     return chain.nextCall(
                             ChatClientRequest.builder()
-                                    .prompt(new Prompt(toolExecutionResult.conversationHistory(),advisedRequest.prompt().getOptions()))
+                                    .prompt(new Prompt(toolExecutionResult.conversationHistory(), advisedRequest.prompt().getOptions()))
                                     .context(advisedResponse.context())
                                     .build());
                 }
@@ -155,10 +155,9 @@ public class DeepSeekToolsAdvisor implements CallAdvisor {
     }
 
 
-
-
     @Override
-    public ChatClientResponse adviseCall(ChatClientRequest chatClientRequest, CallAdvisorChain callAdvisorChain) {
+    @NonNull
+    public ChatClientResponse adviseCall(@NonNull ChatClientRequest chatClientRequest, CallAdvisorChain callAdvisorChain) {
         ChatClientResponse response = callAdvisorChain.nextCall(this.rebuildRequest(chatClientRequest));
         return this.response(chatClientRequest, callAdvisorChain, response);
     }
