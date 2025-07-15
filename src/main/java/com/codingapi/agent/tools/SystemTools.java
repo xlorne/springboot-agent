@@ -16,6 +16,8 @@ public class SystemTools implements ToolsProvider{
         if (timeZone != null && !timeZone.isEmpty()) {
             dateFormat.setTimeZone(java.util.TimeZone.getTimeZone(timeZone));
         }
-        return dateFormat.format(System.currentTimeMillis());
+        String data = dateFormat.format(System.currentTimeMillis());
+        System.out.println(data);
+        return  data;
     }
 }

@@ -13,8 +13,8 @@ class SpringbootAgentApplicationTests {
 
     @Test
     void contextLoads() {
-        String answer = chatService.generationWithDeepseek("123", "你好，现在几点了,Asia/Shanghai时区");
-        System.out.println(answer);
+        String answer = chatService.generationWithDeepseek("123", "你好，现在是白天还是晚上？");
+        System.out.println("answer:\n" + answer);
     }
 
 }

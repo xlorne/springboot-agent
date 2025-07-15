@@ -1,15 +1,14 @@
 package com.codingapi.agent.advisor;
 
 import com.alibaba.fastjson.JSON;
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.NonNull;
-import lombok.Setter;
+import lombok.*;
 import org.springframework.ai.chat.client.ChatClientRequest;
 import org.springframework.ai.chat.client.ChatClientResponse;
+import org.springframework.ai.chat.client.advisor.DefaultAroundAdvisorChain;
 import org.springframework.ai.chat.client.advisor.api.CallAdvisor;
 import org.springframework.ai.chat.client.advisor.api.CallAdvisorChain;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.MessageType;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
@@ -18,6 +17,7 @@ import org.springframework.ai.model.tool.ToolExecutionResult;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.ToolDefinition;
+import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -28,6 +28,23 @@ import java.util.stream.Collectors;
 public class DeepSeekToolsAdvisor implements CallAdvisor {
 
     private final ToolCallingManager toolCallingManager;
+
+    private final static String TOOLS_REQUEST_TEMPLATE =
+            """
+                    question:{question}
+                    You are an assistant that can answer questions using tools.
+                    If You are asked a question that requires a tool, you must respond with a JSON array of tool calls.
+                    [
+                        {
+                          "tool": "tool_name",
+                          "parameters": { /* required parameters matching the JSON Schema */ }
+                        }
+                    ]
+                    Do NOT explain your answer.
+                    Only choose from the tools listed below:
+                    {toolSchemas}
+                    Based on the user question, select the most appropriate tool and provide only the JSON response.
+                    """;
 
     private ChatClientRequest rebuildRequest(ChatClientRequest advisedRequest) {
         Prompt prompt = advisedRequest.prompt();
@@ -46,23 +63,14 @@ public class DeepSeekToolsAdvisor implements CallAdvisor {
                         })
                         .collect(Collectors.joining("\n\n"));
 
-                String toolSchemasTemplate = "\n\n" +
-                        "You are an assistant that can answer questions using tools.\n" +
-                        "You MUST respond only with a JSON object in the following format:\n" +
-                        "[\n" +
-                        "{\n" +
-                        "  \"tool\": \"tool_name\",\n" +
-                        "  \"parameters\": { /* required parameters matching the JSON Schema */ }\n" +
-                        "}\n" +
-                        "]\n\n" +
-                        "Do NOT explain your answer.\n" +
-                        "Only choose from the tools listed below:\n\n" +
-                        toolSchemas +
-                        "\n\nBased on the user question, select the most appropriate tool and provide only the JSON response.";
-                prompt.augmentUserMessage(question + toolSchemasTemplate);
+                String content = TOOLS_REQUEST_TEMPLATE.replace("{question}", question).replace("{toolSchemas}", toolSchemas);
+                Prompt resetPrompt = prompt.augmentUserMessage(content);
                 return ChatClientRequest.builder()
                         .context(advisedRequest.context())
-                        .prompt(advisedRequest.prompt())
+                        .prompt(Prompt.builder()
+                                .chatOptions(prompt.getOptions())
+                                .messages(resetPrompt.getInstructions())
+                                .build())
                         .build();
             }
         }
@@ -72,7 +80,6 @@ public class DeepSeekToolsAdvisor implements CallAdvisor {
 
     private String extractJsonFromAnswer(String text) {
         if (text == null) return "";
-
         int jsonStart = text.indexOf("{");
         int jsonEnd = text.lastIndexOf("}");
         if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart) {
@@ -98,21 +105,39 @@ public class DeepSeekToolsAdvisor implements CallAdvisor {
                     .build();
 
             if (answerResponse.hasToolCalls()) {
-                ToolExecutionResult toolExecutionResult = toolCallingManager.executeToolCalls(advisedRequest.prompt(), answerResponse);
+                Prompt prompt = advisedRequest.prompt();
+                ToolExecutionResult toolExecutionResult = toolCallingManager.executeToolCalls(prompt, answerResponse);
                 if (toolExecutionResult.returnDirect()) {
                     return ChatClientResponse.builder()
-                            .chatResponse(ChatResponse.builder()
-                                    .from(answerResponse)
-                                    .generations(ToolExecutionResult.buildGenerations(toolExecutionResult))
-                                    .build())
-                            .context(advisedResponse.context())
+                            .chatResponse(
+                                    ChatResponse.builder()
+                                            .from(answerResponse)
+                                            .generations(ToolExecutionResult.buildGenerations(toolExecutionResult))
+                                            .build()
+                            )
                             .build();
                 } else {
-                    return chain.nextCall(
+                    List<CallAdvisor> callAdvisors = chain.getCallAdvisors().stream()
+                            .filter(callAdvisor -> !callAdvisor.getName().equals(getName()))
+                            .toList();
+
+                    CallAdvisorChain advisorChain = new DefaultAroundAdvisorChain.Builder(chain.getObservationRegistry())
+                            .pushAll(callAdvisors)
+                            .build();
+
+                    Prompt newPrompt = Prompt.builder()
+                            .messages(toolExecutionResult.conversationHistory())
+                            .chatOptions(prompt.getOptions())
+                            .build();
+
+                    ChatClientResponse response = advisorChain.nextCall(
                             ChatClientRequest.builder()
-                                    .prompt(new Prompt(toolExecutionResult.conversationHistory(), advisedRequest.prompt().getOptions()))
-                                    .context(advisedResponse.context())
+                                    .prompt(newPrompt)
+                                    .context(advisedRequest.context())
                                     .build());
+
+                    return this.response(advisedRequest, advisorChain, response);
+
                 }
             }
 
@@ -126,7 +151,13 @@ public class DeepSeekToolsAdvisor implements CallAdvisor {
 
     private Generation buildAssistantMessage(Generation generation) {
         AssistantMessage assistantMessage = generation.getOutput();
+        if (assistantMessage.getMessageType() != MessageType.ASSISTANT) {
+            return generation;
+        }
         String rawAnswer = assistantMessage.getText();
+        if (!StringUtils.hasText(rawAnswer)) {
+            return generation;
+        }
         String extractedJson = extractJsonFromAnswer(rawAnswer);
         if (extractedJson.isEmpty()) {
             return generation;
@@ -143,11 +174,20 @@ public class DeepSeekToolsAdvisor implements CallAdvisor {
 
         List<AssistantMessage.ToolCall> toolCalls = new ArrayList<>();
         for (FunctionCallResponse functionCallResponse : functionCallResponses) {
-            toolCalls.add(new AssistantMessage.ToolCall(UUID.randomUUID().toString().replaceAll("-", ""), "function", functionCallResponse.getTool(), functionCallResponse.getParameters()));
+            if (functionCallResponse.isValid()) {
+                toolCalls.add(new AssistantMessage.ToolCall(
+                        UUID.randomUUID().toString().replaceAll("-", ""),
+                        "function",
+                        functionCallResponse.getTool(),
+                        functionCallResponse.getParameters())
+                );
+            } else {
+                return generation;
+            }
         }
 
         return new Generation(new AssistantMessage(
-                extractedJson,
+                assistantMessage.getText(),
                 assistantMessage.getMetadata(),
                 toolCalls,
                 assistantMessage.getMedia()
@@ -175,10 +215,14 @@ public class DeepSeekToolsAdvisor implements CallAdvisor {
 
     @Setter
     @Getter
+    @ToString
     public static class FunctionCallResponse {
 
         private String tool;
         private String parameters;
 
+        public boolean isValid() {
+            return tool != null && !tool.isEmpty() && parameters != null && !parameters.isEmpty();
+        }
     }
 }

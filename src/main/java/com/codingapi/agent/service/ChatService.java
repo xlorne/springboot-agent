@@ -9,7 +9,7 @@ import org.springframework.ai.chat.client.advisor.PromptChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
-import org.springframework.ai.chat.prompt.AssistantPromptTemplate;
+import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.stereotype.Service;
 
@@ -26,16 +26,16 @@ public class ChatService {
                        AgentProperties agentProperties) {
         this.toolCallingManager = toolCallingManager;
 
-        PromptChatMemoryAdvisor promptChatMemoryAdvisor =
+
+        PromptChatMemoryAdvisor sessionChatMemoryAdvisor =
                 PromptChatMemoryAdvisor
                         .builder(chatMemory)
-                        .systemPromptTemplate(new AssistantPromptTemplate(agentProperties.getDefaultPromptMemoryTemplateText()))
                         .build();
 
         this.chatClient = modelBuilder
+                .defaultAdvisors(sessionChatMemoryAdvisor)
                 .defaultSystem(agentProperties.getDefaultSystemTemplateText())
                 .defaultTools(toolsContext.getTools())
-                .defaultAdvisors(promptChatMemoryAdvisor)
                 .build();
     }
 
