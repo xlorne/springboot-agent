@@ -12,8 +12,14 @@ class SpringbootAgentApplicationTests {
     private ChatService chatService;
 
     @Test
-    void contextLoads() {
+    void generationWithDeepseek() {
         String answer = chatService.generationWithDeepseek("123", "你好，现在是白天还是晚上？");
+        System.out.println("answer:\n" + answer);
+    }
+
+    @Test
+    void generation() {
+        String answer = chatService.generation("123", "你好，现在是白天还是晚上？，我在新加坡",true);
         System.out.println("answer:\n" + answer);
     }
 
